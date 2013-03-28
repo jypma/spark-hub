@@ -8,7 +8,7 @@
 #include <avr/pgmspace.h>
 
 #define PIN_LED 9
-#define TEMP_INTERVAL 2000
+#define TEMP_INTERVAL 60000
 unsigned char payload[] = "R1     ";
 //                           ^^------- recipient, always spaces for broadcast
 //                             ^------ 1 = temperature
