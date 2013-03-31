@@ -9,10 +9,17 @@
 
 #define PIN_LED 9
 #define TEMP_INTERVAL 60000
+#define PULSE_INTERVAL 1000
 unsigned char payload[] = "R1     ";
 //                           ^^------- recipient, always spaces for broadcast
 //                             ^------ 1 = temperature
 //                              ^^---- temperature, signed 16-bit int
+
+unsigned char pulsePayload[] = "R1               ";
+//                                ^^------- recipient, always spaces for broadcast
+//                                  ^------ 4 = electricity pulses
+//                                   ^^^^^^^^---- pulses, unsigned 64-bit int
+//                                           ^^^^ noise, unsigned 32-bit int
 
 byte buf[66], inputValue;
 MilliTimer ackTimer, tempTimer;
@@ -132,12 +139,39 @@ static void handleInput(char ch) {
     }
 }
 
+volatile unsigned long pulseStarted = 0;
+volatile unsigned long long pulses = 0;
+volatile unsigned long noise = 0;
+volatile bool pulseActivity = false;
+
+void pulse() {
+	unsigned long now = millis();
+	int high = digitalRead(3);
+	if (high) {
+		if (pulseStarted != 0) {
+			pulseActivity = true;
+			unsigned long length = now - pulseStarted;
+			if (length > 20 && length < 40) {
+				pulses++;
+			} else {
+				noise = length;
+			}
+		}
+		pulseStarted = 0;
+	} else {
+		if (pulseStarted == 0) {
+		    pulseStarted = now;
+		}
+	}
+}
+
 void setup () {
     Serial.begin(57600);
     Serial.print("\n[groupRelay]");
     loadConfig();
     tempTimer.set(TEMP_INTERVAL);
     pinMode(PIN_LED, OUTPUT);
+    attachInterrupt(1, pulse, CHANGE);
 //    pinMode(PIN_TEMP1, INPUT);
 //    pinMode(PIN_TEMP2, INPUT);
 //    digitalWrite(PIN_TEMP1, LOW); // disable pullup
@@ -204,7 +238,7 @@ void sendTempPacket() {
 #define PIN_TEMP2 3
     long t1 = 0;
     long t2 = 0;
-    Serial.print("\n[");
+    Serial.print("[");
     for (int i = 0; i < N; i++) {
         if (rf12_recvDone() && rf12_crc == 0) {
             forwardPacket();
@@ -216,8 +250,6 @@ void sendTempPacket() {
     Serial.print(" ");
     Serial.print(t2 / N * 3300 / 1024);
     Serial.print(" ");
-    long l1 = t1 >> 4; // 8
-    long l2 = t2 >> 4;
     //long t = ((l2 - l1) * 3300) / 4096;
     long t = (t2 - t1) * 3300 * 10 / N / 1024;
     Serial.print(t);
@@ -233,7 +265,34 @@ void sendTempPacket() {
         rf12_recvDone();
     Serial.print(" *");
     rf12_sendStart(0, payload, sizeof payload, 1);
-    Serial.print("]");
+    Serial.println("]");
+    digitalWrite(PIN_LED, LOW);
+}
+
+unsigned long lastPulsePacket = 0;
+
+void sendPulsePacket() {
+	cli();
+	unsigned long long pulsesNow = pulses;
+	unsigned long noiseNow = noise;
+	sei();
+	Serial.print("(");
+	Serial.print(millis());
+	Serial.print(")");
+    digitalWrite(PIN_LED, HIGH);
+	Serial.print("[P:");
+	Serial.print((unsigned long)pulsesNow);
+	Serial.print(",");
+	Serial.print(noise);
+	pulsePayload[4] = 4;
+	*((unsigned long long*)(pulsePayload + 5)) = pulsesNow;
+	*((unsigned long*)(pulsePayload + 13)) = noiseNow;
+    // send our packet, once possible
+    while (!rf12_canSend())
+        rf12_recvDone();
+    Serial.print(" *");
+    rf12_sendStart(0, pulsePayload, sizeof pulsePayload, 1);
+    Serial.println("]");
     digitalWrite(PIN_LED, LOW);
 }
 
@@ -244,6 +303,19 @@ void loop () {
     if (tempTimer.poll()) {
       sendTempPacket();
       tempTimer.set(TEMP_INTERVAL);
+    }
+
+	unsigned long now = millis();
+	cli();
+	bool needSendPulse = false;
+    if (pulseActivity && (lastPulsePacket + PULSE_INTERVAL < now)) {
+    	pulseActivity = false;
+    	lastPulsePacket = now;
+    	needSendPulse = true;
+    }
+	sei();
+    if (needSendPulse) {
+    	sendPulsePacket();
     }
 
     if (!rf12_recvDone() || rf12_crc != 0)
