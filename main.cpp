@@ -273,8 +273,8 @@ unsigned long lastPulsePacket = 0;
 
 void sendPulsePacket() {
 	cli();
-	unsigned long long pulsesNow = pulses;
-	unsigned long noiseNow = noise;
+	volatile unsigned long long pulsesNow = pulses;
+	volatile unsigned long noiseNow = noise;
 	sei();
 	Serial.print("(");
 	Serial.print(millis());
