@@ -102,7 +102,7 @@ static void showString(PGM_P s) {
     }
 }
 
-char helpText[] PROGMEM =
+const char helpText[] PROGMEM =
     "\n"
     "Available commands:" "\n"
     "  <n> b      - set MHz band (4 = 433, 8 = 868, 9 = 915)" "\n"
